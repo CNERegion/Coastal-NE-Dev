@@ -1240,9 +1240,20 @@ function renderWeeksLoaded(){
     const pts=Object.values(w.agents||{}).reduce((s,a)=>s+weeklyScore(a),0);
     const published=isPublished(w);
     const row=document.createElement('div');row.className='ytd-week-row';
-    row.innerHTML=`<span style="color:#5F5E5A;flex:1"><strong style="color:#534AB7">Wk ${weekNum}</strong> · ${w.label} ${published?'<span style="font-size:10px;background:#E1F5EE;color:#0F6E56;padding:1px 6px;border-radius:10px;margin-left:4px">Live</span>':'<span style="font-size:10px;background:#FAEEDA;color:#854F0B;padding:1px 6px;border-radius:10px;margin-left:4px">Pending</span>'}</span><span style="display:flex;gap:12px;align-items:center"><span style="color:#1D9E75;font-weight:500">${pts} pts</span><span style="color:#0F6E56;font-weight:500;min-width:50px;text-align:right">${sold>0?fmtMoney(sold):'—'}</span><button data-label="${w.label.replace(/"/g,'&quot;')}" style="font-size:10px;padding:2px 8px;border-radius:10px;border:1px solid #F7C1C1;background:#FCEBEB;color:#A32D2D;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">✕ delete</button></span>`;
-    const btn=row.querySelector('button');
-    btn.addEventListener('click',function(e){
+    row.innerHTML=`<span style="color:#5F5E5A;flex:1"><strong style="color:#534AB7">Wk ${weekNum}</strong> · ${w.label} ${published?'<span style="font-size:10px;background:#E1F5EE;color:#0F6E56;padding:1px 6px;border-radius:10px;margin-left:4px">Live</span>':'<span style="font-size:10px;background:#FAEEDA;color:#854F0B;padding:1px 6px;border-radius:10px;margin-left:4px">Pending</span>'}</span><span style="display:flex;gap:8px;align-items:center"><span style="color:#1D9E75;font-weight:500">${pts} pts</span><span style="color:#0F6E56;font-weight:500;min-width:50px;text-align:right">${sold>0?fmtMoney(sold):'—'}</span><button class="edit-label-btn" data-label="${w.label.replace(/"/g,'&quot;')}" style="font-size:10px;padding:2px 8px;border-radius:10px;border:1px solid #c8c5be;background:#f5f4f0;color:#5F5E5A;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">✏️ rename</button><button class="delete-btn" data-label="${w.label.replace(/"/g,'&quot;')}" style="font-size:10px;padding:2px 8px;border-radius:10px;border:1px solid #F7C1C1;background:#FCEBEB;color:#A32D2D;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">✕ delete</button></span>`;
+    row.querySelector('.edit-label-btn').addEventListener('click',function(e){
+      e.stopPropagation();const oldLabel=this.getAttribute('data-label');
+      const newLabel=window.prompt('Rename "'+oldLabel+'" to:',oldLabel);
+      if(!newLabel||newLabel.trim()===''||newLabel.trim()===oldLabel)return;
+      const nl=newLabel.trim();
+      const idx=_ytdData.weeks.findIndex(function(wk){return wk.label===oldLabel;});
+      if(idx<0){setMsg('Week not found.','#A32D2D');return;}
+      _ytdData.weeks[idx]={..._ytdData.weeks[idx],label:nl};
+      writeToDrive({weeks:_ytdData.weeks})
+        .then(function(){renderWeeksLoaded();setMsg('Renamed "'+oldLabel+'" → "'+nl+'".','#1D9E75');})
+        .catch(function(err){setMsg('Rename failed: '+err.message,'#A32D2D');});
+    });
+    row.querySelector('.delete-btn').addEventListener('click',function(e){
       e.stopPropagation();const lbl=this.getAttribute('data-label');
       _ytdData.weeks=_ytdData.weeks.filter(function(wk){return wk.label!==lbl;});
       writeToDrive({weeks:_ytdData.weeks})
