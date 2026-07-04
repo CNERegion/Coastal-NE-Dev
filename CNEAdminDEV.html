@@ -363,6 +363,7 @@
     </div>
     <div class="btn-row">
       <button class="btn btn-primary" onclick="loadWeek()">💾 Save to Drive (Pending)</button>
+      <button class="btn btn-secondary" onclick="saveAnnouncementsOnly()" style="background:#552448;color:#fff;border-color:#552448">📢 Save Announcements Only</button>
       <button class="btn btn-preview" onclick="previewPending()">👁 Preview Before Publish</button>
       <button class="btn btn-secondary" onclick="loadSampleData()">Load sample data</button>
       <button class="btn btn-secondary" onclick="syncAllWeeksToDrive()" style="background:#534AB7;color:#fff;border-color:#534AB7">☁️ Sync All Weeks to Drive</button>
@@ -1319,6 +1320,39 @@ function renderWeekNavBar(){
   function goToWeek(idx){const y=loadYTD();if(idx<0||idx>=y.weeks.length)return;_currentWeekIdx=idx;const w=y.weeks[idx];window._currentWeekDeals=w.weekDeals||{};window._currentAgents=w.agents||{};window._currentBuyerRows=w.buyerRows||[];updateStatsBar(w.agents||{},w.deals||[]);renderAnnouncements(w.announcements||{});renderSummary(w.agents||{},w.deals||[],'summary-content');renderYTDStandingsForWeek(idx);REGIONS.forEach(r=>renderAgentList(r.id+'-content',w.agents||{},w.deals||[],r.id,r.color));document.getElementById('current-week-label').textContent='Week of '+w.label;renderWeekNavBar();const ytdTab=document.getElementById('ytd-content');if(ytdTab&&ytdTab.style.display!=='none'&&ytdTab.innerHTML!=='')renderYTD();}
   prevBtn.addEventListener('click',()=>goToWeek((_currentWeekIdx>=0?_currentWeekIdx:ytd.weeks.length-1)-1));nextBtn.addEventListener('click',()=>goToWeek((_currentWeekIdx>=0?_currentWeekIdx:ytd.weeks.length-1)+1));sel.addEventListener('change',function(){goToWeek(parseInt(this.value));});
 }
+
+function saveAnnouncementsOnly(){
+  var label=document.getElementById('week-label-input').value.trim();
+  if(!label){setMsg('Please enter the week label so I know which week to update.','#A32D2D');return;}
+  var announcements={
+    company:(document.getElementById('announce-company').value||'').trim(),
+    seacoast:(document.getElementById('announce-seacoast').value||'').trim(),
+    ma:(document.getElementById('announce-ma').value||'').trim(),
+    maine:(document.getElementById('announce-maine').value||'').trim()
+  };
+  setMsg('Saving announcements to Drive…','#185FA5');
+  readFromDrive()
+    .then(function(existing){
+      var weeks=existing.weeks||[];
+      var idx=weeks.findIndex(function(w){return w.label===label;});
+      if(idx<0){setMsg('Week "'+label+'" not found — make sure the label matches exactly.','#A32D2D');return Promise.reject('not found');}
+      weeks[idx]={...weeks[idx],announcements:announcements};
+      return writeToDrive({weeks:weeks}).then(function(){return weeks;});
+    })
+    .then(function(weeks){
+      _ytdData={weeks:weeks};
+      renderAnnouncements(announcements);
+      document.getElementById('announce-company').value='';
+      document.getElementById('announce-seacoast').value='';
+      document.getElementById('announce-ma').value='';
+      document.getElementById('announce-maine').value='';
+      setMsg('✓ Announcements saved for "'+label+'".','#1D9E75');
+    })
+    .catch(function(e){
+      if(e!=='not found')setMsg('✗ Save failed: '+e.message,'#A32D2D');
+    });
+}
+
 
 function renderAnnouncements(ann){
   const wrap=document.getElementById('announcements-wrap');
