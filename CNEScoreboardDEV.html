@@ -556,6 +556,30 @@ function parseMoney(str){if(!str)return 0;const n=parseFloat((str+'').replace(/[
 function fmtMoney(n){if(n>=1000000)return'$'+(n/1000000).toFixed(2)+'M';if(n>=1000)return'$'+Math.round(n/1000)+'K';return'$'+Math.round(n).toLocaleString();}
 function fmtPct(n){return n.toFixed(1)+'%';}
 function sideBreakdown(l,b,bo){const p=[];if(l)p.push(`${l} list side`);if(b)p.push(`${b} buy side`);if(bo)p.push(`${bo} both sides`);return p.length?' · '+p.join(' / '):''}
+function labelToDate(w){
+  var lbl=(w.label||'').trim();
+  var m=lbl.match(/([A-Za-z]+)\s+(\d+)/);
+  var yr=lbl.match(/(\d{4})/);
+  if(m&&yr){
+    var month=m[1];
+    var day=parseInt(m[2]);
+    var year=parseInt(yr[1]);
+    var d=new Date(month+' '+day+', '+year);
+    if(month.toLowerCase().startsWith('dec')&&year>=2026){
+      d=new Date(month+' '+day+', '+(year-1));
+    }
+    return d;
+  }
+  return new Date(w.loadedAt||0);
+}
+// Global week number = position when ALL weeks (published + pending) are
+// sorted chronologically by date — this matches the admin panel's numbering.
+function getGlobalWeekNumber(week){
+  var allWeeks=_ytdData.weeks||[];
+  var sorted=[...allWeeks].sort(function(a,b){return labelToDate(a)-labelToDate(b);});
+  var idx=sorted.findIndex(function(w){return w.label===week.label;});
+  return idx>=0?idx+1:'?';
+}
 function loadYTD(){return{weeks:_ytdData._publishedWeeks||_ytdData.weeks||[]};}
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1241,7 +1265,7 @@ function renderWeekNavBar(){
   const selWrap=document.createElement('div');selWrap.style.cssText='position:relative;flex:1;min-width:0';
   const sel=document.createElement('select');sel.style.cssText="width:100%;padding:5px 24px 5px 10px;border:1px solid #CECBF6;border-radius:8px;font-size:12px;font-weight:500;color:#534AB7;background:#fff;cursor:pointer;appearance:none;-webkit-appearance:none;font-family:'DM Sans',sans-serif";
   const curIdx=_currentWeekIdx>=0?_currentWeekIdx:ytd.weeks.length-1;
-  ytd.weeks.forEach((w,i)=>{const opt=document.createElement('option');opt.value=i;opt.textContent='Wk '+(i+1)+' · '+w.label;if(i===curIdx)opt.selected=true;sel.appendChild(opt);});
+  ytd.weeks.forEach((w,i)=>{const opt=document.createElement('option');opt.value=i;opt.textContent='Wk '+getGlobalWeekNumber(w)+' · '+w.label;if(i===curIdx)opt.selected=true;sel.appendChild(opt);});
   const arr=document.createElement('div');arr.style.cssText='position:absolute;right:8px;top:50%;transform:translateY(-50%);pointer-events:none;color:#534AB7;font-size:9px';arr.textContent='▼';
   selWrap.appendChild(sel);selWrap.appendChild(arr);bar.appendChild(selWrap);
   const nextBtn=document.createElement('button');nextBtn.innerHTML='→';nextBtn.style.cssText='width:28px;height:28px;border-radius:50%;border:1px solid #CECBF6;background:#fff;font-size:13px;color:#534AB7;cursor:pointer;flex-shrink:0;transition:background .15s';

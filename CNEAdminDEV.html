@@ -871,7 +871,7 @@ function loadWeek(){
   if(buyText){var r=parseBuyers(buyText,parsed.agents);agentMap=r.agentMap;buyerRows=r.buyerRows;}
 
   var publishAt=getNextPublishISO();
-  var announcements={
+  var typedAnnouncements={
     company:(document.getElementById('announce-company').value||'').trim(),
     seacoast:(document.getElementById('announce-seacoast').value||'').trim(),
     ma:(document.getElementById('announce-ma').value||'').trim(),
@@ -883,6 +883,16 @@ function loadWeek(){
     .then(function(existing){
       var weeks=existing.weeks||[];
       var existingIdx=weeks.findIndex(function(w){return w.label===label;});
+      // Preserve any previously-saved announcements for this week if the
+      // announcement boxes are empty right now (e.g. they were already
+      // saved via "Save Announcements Only" and cleared afterward).
+      var priorAnnouncements=(existingIdx>=0&&weeks[existingIdx].announcements)?weeks[existingIdx].announcements:{};
+      var announcements={
+        company:typedAnnouncements.company||priorAnnouncements.company||'',
+        seacoast:typedAnnouncements.seacoast||priorAnnouncements.seacoast||'',
+        ma:typedAnnouncements.ma||priorAnnouncements.ma||'',
+        maine:typedAnnouncements.maine||priorAnnouncements.maine||''
+      };
       var weekEntry={label:label,loadedAt:new Date().toISOString(),publishAt:publishAt,agents:agentMap,deals:deals,weekDeals:weekDeals,buyerRows:buyerRows,announcements:announcements};
       if(existingIdx>=0)weeks[existingIdx]=weekEntry;else weeks.push(weekEntry);
       weeks.sort(function(a,b){return new Date(a.loadedAt)-new Date(b.loadedAt);});
@@ -1324,7 +1334,7 @@ function renderWeekNavBar(){
   el.style.display='block';el.innerHTML='';const isLatest=_currentWeekIdx<0||_currentWeekIdx===ytd.weeks.length-1;const bar=document.createElement('div');bar.style.cssText='display:flex;align-items:center;gap:8px;background:#EEEDFE;border:1px solid #CECBF6;border-radius:12px;padding:8px 14px;';
   const dot=document.createElement('div');dot.style.cssText='width:8px;height:8px;border-radius:50%;background:#534AB7;flex-shrink:0';bar.appendChild(dot);const lbl=document.createElement('span');lbl.style.cssText='font-size:12px;font-weight:500;color:#534AB7;white-space:nowrap;flex-shrink:0';lbl.textContent='Viewing week';bar.appendChild(lbl);
   const prevBtn=document.createElement('button');prevBtn.innerHTML='←';prevBtn.style.cssText='width:28px;height:28px;border-radius:50%;border:1px solid #CECBF6;background:#fff;font-size:13px;color:#534AB7;cursor:pointer;flex-shrink:0';prevBtn.disabled=(_currentWeekIdx<=0);prevBtn.style.opacity=prevBtn.disabled?'0.3':'1';bar.appendChild(prevBtn);
-  const selWrap=document.createElement('div');selWrap.style.cssText='position:relative;flex:1;min-width:0';const sel=document.createElement('select');sel.id='week-nav-select';sel.style.cssText="width:100%;padding:5px 24px 5px 10px;border:1px solid #CECBF6;border-radius:8px;font-size:12px;font-weight:500;color:#534AB7;background:#fff;cursor:pointer;appearance:none;-webkit-appearance:none;font-family:'DM Sans',sans-serif";const curIdx=_currentWeekIdx>=0?_currentWeekIdx:ytd.weeks.length-1;ytd.weeks.forEach((w,i)=>{const opt=document.createElement('option');opt.value=i;opt.textContent='Wk '+(i+1)+' · '+w.label;if(i===curIdx)opt.selected=true;sel.appendChild(opt);});const arr=document.createElement('div');arr.style.cssText='position:absolute;right:8px;top:50%;transform:translateY(-50%);pointer-events:none;color:#534AB7;font-size:9px';arr.textContent='▼';selWrap.appendChild(sel);selWrap.appendChild(arr);bar.appendChild(selWrap);
+  const selWrap=document.createElement('div');selWrap.style.cssText='position:relative;flex:1;min-width:0';const sel=document.createElement('select');sel.id='week-nav-select';sel.style.cssText="width:100%;padding:5px 24px 5px 10px;border:1px solid #CECBF6;border-radius:8px;font-size:12px;font-weight:500;color:#534AB7;background:#fff;cursor:pointer;appearance:none;-webkit-appearance:none;font-family:'DM Sans',sans-serif";const curIdx=_currentWeekIdx>=0?_currentWeekIdx:ytd.weeks.length-1;const sortedForNum=[...ytd.weeks].sort(function(a,b){return labelToDate(a)-labelToDate(b);});ytd.weeks.forEach((w,i)=>{const opt=document.createElement('option');opt.value=i;const wkNum=sortedForNum.findIndex(function(sw){return sw.label===w.label;})+1;opt.textContent='Wk '+wkNum+' · '+w.label;if(i===curIdx)opt.selected=true;sel.appendChild(opt);});const arr=document.createElement('div');arr.style.cssText='position:absolute;right:8px;top:50%;transform:translateY(-50%);pointer-events:none;color:#534AB7;font-size:9px';arr.textContent='▼';selWrap.appendChild(sel);selWrap.appendChild(arr);bar.appendChild(selWrap);
   const nextBtn=document.createElement('button');nextBtn.innerHTML='→';nextBtn.style.cssText='width:28px;height:28px;border-radius:50%;border:1px solid #CECBF6;background:#fff;font-size:13px;color:#534AB7;cursor:pointer;flex-shrink:0';nextBtn.disabled=isLatest;nextBtn.style.opacity=nextBtn.disabled?'0.3':'1';bar.appendChild(nextBtn);
   if(!isLatest){const curBtn=document.createElement('button');curBtn.textContent='→ Current week';curBtn.style.cssText="font-size:11px;font-weight:500;padding:4px 12px;border-radius:20px;border:1px solid #534AB7;background:#534AB7;color:#fff;cursor:pointer;white-space:nowrap;flex-shrink:0;font-family:'DM Sans',sans-serif";curBtn.addEventListener('click',()=>goToWeek(ytd.weeks.length-1));bar.appendChild(curBtn);}
   el.appendChild(bar);
