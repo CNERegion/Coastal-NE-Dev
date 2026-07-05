@@ -280,11 +280,13 @@
   .ticker-wrap{width:100%;overflow:hidden;padding:0;border-radius:8px;}
   .ticker-inner{display:flex;align-items:center;height:36px;}
   .ticker-label{flex-shrink:0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:0 12px;height:100%;display:flex;align-items:center;white-space:nowrap;}
-  .ticker-track{flex:1;overflow:hidden;height:100%;display:flex;align-items:center;}
-  .ticker-content{display:inline-block;white-space:nowrap;font-size:13px;font-weight:500;padding-left:100%;animation:ticker-scroll 25s linear infinite;}
-  .ticker-content:hover{animation-play-state:paused;}
-  @keyframes ticker-scroll{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}
-  @media(max-width:480px){.ticker-content{font-size:12px;}.ticker-label{font-size:10px;padding:0 8px;}}
+  .ticker-track{flex:1;overflow:hidden;height:100%;display:flex;align-items:center;position:relative;}
+  .ticker-move{display:flex;white-space:nowrap;width:max-content;}
+  .ticker-move.is-animating{animation:ticker-scroll linear infinite;}
+  .ticker-move:hover{animation-play-state:paused;}
+  .ticker-seg{display:inline-flex;align-items:center;white-space:nowrap;font-size:13px;font-weight:500;padding-right:56px;}
+  @keyframes ticker-scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+  @media(max-width:480px){.ticker-seg{font-size:12px;padding-right:36px;}.ticker-label{font-size:10px;padding:0 8px;}}
 </style>
 </head>
 <body>
@@ -341,23 +343,27 @@
       <textarea id="buyers-paste" placeholder="Paste your full buyer agreements tab here (headers included)…"></textarea>
     </div>
     <div style="margin-top:12px;border:1px solid #e2e0d8;border-radius:10px;overflow:hidden;">
-      <div style="background:#fafaf8;padding:8px 14px;border-bottom:1px solid #e2e0d8;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#5F5E5A">📢 Announcements <span style="font-weight:400;font-size:11px;text-transform:none;letter-spacing:0;color:#aaa9a2">— leave blank to hide that banner this week</span></div>
+      <div style="background:#fafaf8;padding:8px 14px;border-bottom:1px solid #e2e0d8;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#5F5E5A">📢 Announcements <span style="font-weight:400;font-size:11px;text-transform:none;letter-spacing:0;color:#aaa9a2">— leave blank to hide that banner this week · set "expires" to auto-remove it at a date/time, or leave blank to run all week</span></div>
       <div style="padding:10px 14px;display:flex;flex-direction:column;gap:8px;">
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:11px;font-weight:600;color:#552448;min-width:110px">🏢 Company</span>
           <input id="announce-company" type="text" placeholder="Company-wide announcement…" style="flex:1;padding:6px 10px;border:1px solid #e2e0d8;border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;color:#1a1a18">
+          <input id="announce-company-expires" type="datetime-local" title="Auto-hide after this date/time (optional)" style="padding:6px 8px;border:1px solid #e2e0d8;border-radius:8px;font-size:12px;font-family:'DM Sans',sans-serif;color:#5F5E5A">
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:11px;font-weight:600;color:#185FA5;min-width:110px">🌊 Seacoast NH</span>
           <input id="announce-seacoast" type="text" placeholder="Seacoast NH announcement…" style="flex:1;padding:6px 10px;border:1px solid #e2e0d8;border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;color:#1a1a18">
+          <input id="announce-seacoast-expires" type="datetime-local" title="Auto-hide after this date/time (optional)" style="padding:6px 8px;border:1px solid #e2e0d8;border-radius:8px;font-size:12px;font-family:'DM Sans',sans-serif;color:#5F5E5A">
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:11px;font-weight:600;color:#993556;min-width:110px">🍁 Massachusetts</span>
           <input id="announce-ma" type="text" placeholder="Massachusetts announcement…" style="flex:1;padding:6px 10px;border:1px solid #e2e0d8;border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;color:#1a1a18">
+          <input id="announce-ma-expires" type="datetime-local" title="Auto-hide after this date/time (optional)" style="padding:6px 8px;border:1px solid #e2e0d8;border-radius:8px;font-size:12px;font-family:'DM Sans',sans-serif;color:#5F5E5A">
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:11px;font-weight:600;color:#0F6E56;min-width:110px">🌲 Maine</span>
           <input id="announce-maine" type="text" placeholder="Maine announcement…" style="flex:1;padding:6px 10px;border:1px solid #e2e0d8;border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;color:#1a1a18">
+          <input id="announce-maine-expires" type="datetime-local" title="Auto-hide after this date/time (optional)" style="padding:6px 8px;border:1px solid #e2e0d8;border-radius:8px;font-size:12px;font-family:'DM Sans',sans-serif;color:#5F5E5A">
         </div>
       </div>
     </div>
@@ -872,10 +878,10 @@ function loadWeek(){
 
   var publishAt=getNextPublishISO();
   var typedAnnouncements={
-    company:(document.getElementById('announce-company').value||'').trim(),
-    seacoast:(document.getElementById('announce-seacoast').value||'').trim(),
-    ma:(document.getElementById('announce-ma').value||'').trim(),
-    maine:(document.getElementById('announce-maine').value||'').trim()
+    company:{text:(document.getElementById('announce-company').value||'').trim(), expiresAt:(document.getElementById('announce-company-expires').value||'')},
+    seacoast:{text:(document.getElementById('announce-seacoast').value||'').trim(), expiresAt:(document.getElementById('announce-seacoast-expires').value||'')},
+    ma:{text:(document.getElementById('announce-ma').value||'').trim(), expiresAt:(document.getElementById('announce-ma-expires').value||'')},
+    maine:{text:(document.getElementById('announce-maine').value||'').trim(), expiresAt:(document.getElementById('announce-maine-expires').value||'')}
   };
   setMsg('Saving to Google Drive…','#185FA5');
 
@@ -887,11 +893,16 @@ function loadWeek(){
       // announcement boxes are empty right now (e.g. they were already
       // saved via "Save Announcements Only" and cleared afterward).
       var priorAnnouncements=(existingIdx>=0&&weeks[existingIdx].announcements)?weeks[existingIdx].announcements:{};
+      function mergeField(typed,priorRaw){
+        if(typed.text)return {text:typed.text, expiresAt:typed.expiresAt||''};
+        var prior=normalizeAnnouncement(priorRaw);
+        return {text:prior.text||'', expiresAt:prior.expiresAt||''};
+      }
       var announcements={
-        company:typedAnnouncements.company||priorAnnouncements.company||'',
-        seacoast:typedAnnouncements.seacoast||priorAnnouncements.seacoast||'',
-        ma:typedAnnouncements.ma||priorAnnouncements.ma||'',
-        maine:typedAnnouncements.maine||priorAnnouncements.maine||''
+        company:mergeField(typedAnnouncements.company,priorAnnouncements.company),
+        seacoast:mergeField(typedAnnouncements.seacoast,priorAnnouncements.seacoast),
+        ma:mergeField(typedAnnouncements.ma,priorAnnouncements.ma),
+        maine:mergeField(typedAnnouncements.maine,priorAnnouncements.maine)
       };
       var weekEntry={label:label,loadedAt:new Date().toISOString(),publishAt:publishAt,agents:agentMap,deals:deals,weekDeals:weekDeals,buyerRows:buyerRows,announcements:announcements};
       if(existingIdx>=0)weeks[existingIdx]=weekEntry;else weeks.push(weekEntry);
@@ -910,9 +921,13 @@ function loadWeek(){
       document.getElementById('transactions-paste').value='';
       document.getElementById('buyers-paste').value='';
       document.getElementById('announce-company').value='';
+      document.getElementById('announce-company-expires').value='';
       document.getElementById('announce-seacoast').value='';
+      document.getElementById('announce-seacoast-expires').value='';
       document.getElementById('announce-ma').value='';
+      document.getElementById('announce-ma-expires').value='';
       document.getElementById('announce-maine').value='';
+      document.getElementById('announce-maine-expires').value='';
     })
     .catch(function(e){
       setMsg('✗ Drive save failed: '+e.message,'#A32D2D');
@@ -1346,10 +1361,10 @@ function saveAnnouncementsOnly(){
   var label=document.getElementById('week-label-input').value.trim();
   if(!label){setMsg('Please enter the week label so I know which week to update.','#A32D2D');return;}
   var announcements={
-    company:(document.getElementById('announce-company').value||'').trim(),
-    seacoast:(document.getElementById('announce-seacoast').value||'').trim(),
-    ma:(document.getElementById('announce-ma').value||'').trim(),
-    maine:(document.getElementById('announce-maine').value||'').trim()
+    company:{text:(document.getElementById('announce-company').value||'').trim(), expiresAt:(document.getElementById('announce-company-expires').value||'')},
+    seacoast:{text:(document.getElementById('announce-seacoast').value||'').trim(), expiresAt:(document.getElementById('announce-seacoast-expires').value||'')},
+    ma:{text:(document.getElementById('announce-ma').value||'').trim(), expiresAt:(document.getElementById('announce-ma-expires').value||'')},
+    maine:{text:(document.getElementById('announce-maine').value||'').trim(), expiresAt:(document.getElementById('announce-maine-expires').value||'')}
   };
   setMsg('Saving announcements to Drive…','#185FA5');
   readFromDrive()
@@ -1364,9 +1379,13 @@ function saveAnnouncementsOnly(){
       _ytdData={weeks:weeks};
       renderAnnouncements(announcements);
       document.getElementById('announce-company').value='';
+      document.getElementById('announce-company-expires').value='';
       document.getElementById('announce-seacoast').value='';
+      document.getElementById('announce-seacoast-expires').value='';
       document.getElementById('announce-ma').value='';
+      document.getElementById('announce-ma-expires').value='';
       document.getElementById('announce-maine').value='';
+      document.getElementById('announce-maine-expires').value='';
       setMsg('✓ Announcements saved for "'+label+'".','#1D9E75');
     })
     .catch(function(e){
@@ -1375,6 +1394,43 @@ function saveAnnouncementsOnly(){
 }
 
 
+// ── Announcement helpers: expiration + seamless ticker scroll ──
+// Announcements are stored per-key as either a plain string (legacy weeks
+// saved before expiration existed) or {text, expiresAt}. expiresAt is a
+// datetime-local string (e.g. "2026-07-09T10:00") or '' for "never expires".
+function normalizeAnnouncement(val){
+  if(!val) return {text:'', expiresAt:''};
+  if(typeof val==='string') return {text:val, expiresAt:''};
+  return {text:val.text||'', expiresAt:val.expiresAt||''};
+}
+function isAnnouncementExpired(expiresAt){
+  if(!expiresAt) return false;
+  const t=new Date(expiresAt).getTime();
+  if(isNaN(t)) return false;
+  return Date.now()>t;
+}
+// Measures one copy of the (duplicated) ticker text and sets a duration so
+// scroll speed stays consistent regardless of message length, then only
+// turns on the animation if the text is actually wider than its track
+// (short messages just sit still — nothing to loop).
+function setupTickerScroll(moveEl){
+  requestAnimationFrame(function(){
+    const seg=moveEl.querySelector('.ticker-seg');
+    const track=moveEl.parentElement;
+    if(!seg||!track)return;
+    const segWidth=seg.getBoundingClientRect().width;
+    const trackWidth=track.getBoundingClientRect().width;
+    if(segWidth<=trackWidth){
+      const segs=moveEl.querySelectorAll('.ticker-seg');
+      if(segs[1])segs[1].remove();
+      return;
+    }
+    const PIXELS_PER_SECOND=55;
+    const duration=segWidth/PIXELS_PER_SECOND;
+    moveEl.style.animationDuration=duration+'s';
+    moveEl.classList.add('is-animating');
+  });
+}
 function renderAnnouncements(ann){
   const wrap=document.getElementById('announcements-wrap');
   if(!wrap)return;
@@ -1386,14 +1442,16 @@ function renderAnnouncements(ann){
     {key:'maine', label:'🌲 Maine', bg:'#0F6E56', color:'#fff'},
   ];
   banners.forEach(b=>{
-    const text=(ann[b.key]||'').trim();
+    const norm=normalizeAnnouncement(ann[b.key]);
+    const text=(norm.text||'').trim();
     if(!text)return;
-    const repeated=text+'     ·     '+text+'     ·     '+text+'     ·     '+text;
+    if(isAnnouncementExpired(norm.expiresAt))return;
     const ticker=document.createElement('div');
     ticker.className='ticker-wrap';
     ticker.style.background=b.bg;
-    ticker.innerHTML=`<div class="ticker-inner"><span class="ticker-label" style="color:${b.color};border-right:1px solid rgba(255,255,255,0.3)">${b.label}</span><div class="ticker-track"><span class="ticker-content" style="color:${b.color}">${repeated}</span></div></div>`;
+    ticker.innerHTML=`<div class="ticker-inner"><span class="ticker-label" style="color:${b.color};border-right:1px solid rgba(255,255,255,0.3)">${b.label}</span><div class="ticker-track"><div class="ticker-move"><span class="ticker-seg" style="color:${b.color}">${text}</span><span class="ticker-seg" style="color:${b.color}">${text}</span></div></div></div>`;
     wrap.appendChild(ticker);
+    setupTickerScroll(ticker.querySelector('.ticker-move'));
   });
 }
 
@@ -1500,6 +1558,45 @@ function showTab(id,el,color,afterRender){
       setDriveStatus('Could not load from Drive: '+e.message,'err');
       applyData(MIGRATED_DATA);
     });
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRE-FILL ANNOUNCEMENT BOXES WITH EXISTING SAVED VALUES
+// Prevents accidentally blanking out banners for regions you didn't mean to touch
+// when you only want to add/change one or two of the four.
+// ═══════════════════════════════════════════════════════════════════════════════
+function prefillAnnouncementsForLabel(){
+  var label=(document.getElementById('week-label-input').value||'').trim();
+  if(!label)return;
+  var weeks=_ytdData.weeks||[];
+  var match=weeks.find(function(w){return w.label===label;});
+  var rawAnn=(match&&match.announcements)?match.announcements:{};
+  var co=normalizeAnnouncement(rawAnn.company);
+  var sc=normalizeAnnouncement(rawAnn.seacoast);
+  var ma=normalizeAnnouncement(rawAnn.ma);
+  var me=normalizeAnnouncement(rawAnn.maine);
+  // Only pre-fill boxes that are currently empty, so we never clobber
+  // something the person is actively mid-typing.
+  var coEl=document.getElementById('announce-company');
+  var coExpEl=document.getElementById('announce-company-expires');
+  var scEl=document.getElementById('announce-seacoast');
+  var scExpEl=document.getElementById('announce-seacoast-expires');
+  var maEl=document.getElementById('announce-ma');
+  var maExpEl=document.getElementById('announce-ma-expires');
+  var meEl=document.getElementById('announce-maine');
+  var meExpEl=document.getElementById('announce-maine-expires');
+  if(coEl&&!coEl.value)coEl.value=co.text||'';
+  if(coExpEl&&!coExpEl.value)coExpEl.value=co.expiresAt||'';
+  if(scEl&&!scEl.value)scEl.value=sc.text||'';
+  if(scExpEl&&!scExpEl.value)scExpEl.value=sc.expiresAt||'';
+  if(maEl&&!maEl.value)maEl.value=ma.text||'';
+  if(maExpEl&&!maExpEl.value)maExpEl.value=ma.expiresAt||'';
+  if(meEl&&!meEl.value)meEl.value=me.text||'';
+  if(meExpEl&&!meExpEl.value)meExpEl.value=me.expiresAt||'';
+}
+(function wirePrefill(){
+  var input=document.getElementById('week-label-input');
+  if(input)input.addEventListener('blur',prefillAnnouncementsForLabel);
 })();
 
 </script>
