@@ -431,6 +431,7 @@ function loadFromDrive(){
         _ytdData=data;
       }else{
         _ytdData=PRELOADED_DATA;
+        if(data&&data.announcements)_ytdData.announcements=data.announcements;
       }
       initDisplay();
     })
@@ -1279,7 +1280,7 @@ function renderWeekNavBar(){
     _currentWeekIdx=idx;const w=y.weeks[idx];
     window._currentWeekDeals=w.weekDeals||{};window._currentAgents=w.agents||{};window._currentBuyerRows=w.buyerRows||[];
     updateStatsBar(w.agents||{},w.deals||[]);
-    renderAnnouncements(w.announcements||{});
+    renderAnnouncements(normalizeAnnouncementsStore((_ytdData||{}).announcements));
     renderSummary(w.agents||{},w.deals||[],'summary-content');
     renderYTDStandingsForWeek(idx);
     REGIONS.forEach(r=>renderAgentList(r.id+'-content',w.agents||{},w.deals||[],r.id,r.color));
@@ -1291,20 +1292,38 @@ function renderWeekNavBar(){
   sel.addEventListener('change',function(){goToWeek(parseInt(this.value));});
 }
 
-// ── Announcement helpers: expiration + seamless ticker scroll ──
-// Announcements are stored per-key as either a plain string (legacy weeks
-// saved before expiration existed) or {text, expiresAt}. expiresAt is a
-// datetime-local string (e.g. "2026-07-09T10:00") or '' for "never expires".
-function normalizeAnnouncement(val){
-  if(!val) return {text:'', expiresAt:''};
-  if(typeof val==='string') return {text:val, expiresAt:''};
-  return {text:val.text||'', expiresAt:val.expiresAt||''};
+// ── Announcements: independent of week data, run on their own start/end date-time ──
+// Stored top-level in Drive as {company:[...], seacoast:[...], ma:[...], maine:[...]}.
+// Each entry: {id, text, startAt, endAt, createdAt, updatedAt}. startAt/endAt are
+// datetime-local strings, or '' meaning "no bound" (starts now / never expires).
+const ANNOUNCEMENT_BANNERS=[
+  {key:'company', label:'📢 Company', bg:'#552448', color:'#fff'},
+  {key:'seacoast', label:'🌊 Seacoast NH', bg:'#185FA5', color:'#fff'},
+  {key:'ma', label:'🍁 Massachusetts', bg:'#993556', color:'#fff'},
+  {key:'maine', label:'🌲 Maine', bg:'#0F6E56', color:'#fff'},
+];
+function normalizeAnnouncementsStore(raw){
+  const store={company:[],seacoast:[],ma:[],maine:[]};
+  if(raw&&typeof raw==='object'){
+    ['company','seacoast','ma','maine'].forEach(function(k){
+      if(Array.isArray(raw[k])) store[k]=raw[k].filter(Boolean);
+    });
+  }
+  return store;
 }
-function isAnnouncementExpired(expiresAt){
-  if(!expiresAt) return false;
-  const t=new Date(expiresAt).getTime();
-  if(isNaN(t)) return false;
-  return Date.now()>t;
+function isAnnouncementActive(entry,now){
+  now=now||new Date();
+  if(entry.startAt){const s=new Date(entry.startAt);if(!isNaN(s)&&now<s)return false;}
+  if(entry.endAt){const e=new Date(entry.endAt);if(!isNaN(e)&&now>e)return false;}
+  return true;
+}
+function pickActiveAnnouncement(list){
+  if(!Array.isArray(list))return null;
+  const now=new Date();
+  const active=list.filter(function(a){return a&&a.text&&isAnnouncementActive(a,now);});
+  if(!active.length)return null;
+  active.sort(function(a,b){return new Date(b.updatedAt||b.createdAt||0)-new Date(a.updatedAt||a.createdAt||0);});
+  return active[0];
 }
 // Measures one copy of the (duplicated) ticker text and sets a duration so
 // scroll speed stays consistent regardless of message length. Always
@@ -1321,23 +1340,18 @@ function setupTickerScroll(moveEl){
     moveEl.classList.add('is-animating');
   });
 }
-let _lastAnnouncements={};
-function renderAnnouncements(ann){
+// Renders whichever announcements are active right now for each region.
+// Independent of which week is being viewed — a banner runs on its own
+// start/end date regardless of the scoreboard's current week.
+function renderAnnouncements(store){
   const wrap=document.getElementById('announcements-wrap');
   if(!wrap)return;
-  _lastAnnouncements=ann||{};
   wrap.innerHTML='';
-  const banners=[
-    {key:'company', label:'📢 Company', bg:'#552448', color:'#fff'},
-    {key:'seacoast', label:'🌊 Seacoast NH', bg:'#185FA5', color:'#fff'},
-    {key:'ma', label:'🍁 Massachusetts', bg:'#993556', color:'#fff'},
-    {key:'maine', label:'🌲 Maine', bg:'#0F6E56', color:'#fff'},
-  ];
-  banners.forEach(b=>{
-    const norm=normalizeAnnouncement(ann[b.key]);
-    const text=(norm.text||'').trim();
+  ANNOUNCEMENT_BANNERS.forEach(function(b){
+    const entry=pickActiveAnnouncement((store||{})[b.key]);
+    if(!entry)return;
+    const text=(entry.text||'').trim();
     if(!text)return;
-    if(isAnnouncementExpired(norm.expiresAt))return;
     const ticker=document.createElement('div');
     ticker.className='ticker-wrap';
     ticker.style.background=b.bg;
@@ -1356,15 +1370,14 @@ function renderAnnouncements(ann){
     setupTickerScroll(ticker.querySelector('.ticker-move'));
   });
 }
-// Re-check expirations once a minute so a banner disappears on its own at
-// the set time even if the visitor leaves the page open without reloading.
-setInterval(function(){renderAnnouncements(_lastAnnouncements);},60000);
+// Re-check active/expired status once a minute so a banner appears or
+// disappears on its own at the set time, even if the page is left open.
+setInterval(function(){renderAnnouncements(normalizeAnnouncementsStore((_ytdData||{}).announcements));},60000);
 
 function renderAll(agentMap,deals,weekDeals){
   window._currentWeekDeals=weekDeals||{};window._currentAgents=agentMap||{};window._currentBuyerRows=window._currentBuyerRows||[];
   updateStatsBar(agentMap,deals);renderWeekNavBar();
-  const ytd=loadYTD();const idx=_currentWeekIdx>=0?_currentWeekIdx:ytd.weeks.length-1;
-  const currentWeek=ytd.weeks[idx];renderAnnouncements(currentWeek?currentWeek.announcements||{}:{});
+  renderAnnouncements(normalizeAnnouncementsStore((_ytdData||{}).announcements));
   const existingBanner=document.querySelector('.detail-banner');if(existingBanner)existingBanner.remove();
   renderSummary(agentMap,deals,'summary-content');
   if(existingBanner){const summaryEl=document.getElementById('summary-content');const newBanner=summaryEl.querySelector('.detail-banner');if(newBanner)newBanner.replaceWith(existingBanner);else summaryEl.appendChild(existingBanner);}
