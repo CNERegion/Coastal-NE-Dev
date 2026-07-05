@@ -869,6 +869,9 @@ function renderAgentListContent(el,agentMap,deals,regionId,regionColor,r,weekDea
   wlbWrap.appendChild(wlbHdrTop);wlbWrap.appendChild(wlbPanel);wlbWrap.appendChild(wlbHdrBottom);
   el.appendChild(wlbWrap);
 
+  const kudosHtml=renderKudosPanelHtml(computeAutoKudos(list,weekDeals||window._currentWeekDeals||{},regionId),normalizeSpecialKudosStore((_ytdData||{}).specialKudos)[regionId]||[],r.color);
+  if(kudosHtml){const kudosHost=document.createElement('div');kudosHost.innerHTML=kudosHtml;el.appendChild(kudosHost.firstElementChild);}
+
   const weeklyYtdAgents={};
   list.forEach(a=>{
     const ak=agentKey(a.name);
@@ -1087,6 +1090,9 @@ function renderSummary(agentMap,deals,containerId){
   wlbHdrTopS.addEventListener('click',toggleWlbS);wlbHdrBottomS.addEventListener('click',toggleWlbS);
   wlbWrapS.appendChild(wlbHdrTopS);wlbWrapS.appendChild(wlbPanelS);wlbWrapS.appendChild(wlbHdrBottomS);
   el.appendChild(wlbWrapS);
+  const summaryKudosStore=normalizeSpecialKudosStore((_ytdData||{}).specialKudos);
+  const summaryKudosHtml=renderKudosPanelHtml(computeAutoKudos(Object.values(agentMap),window._currentWeekDeals||{},null),[].concat(summaryKudosStore.seacoast||[],summaryKudosStore.ma||[],summaryKudosStore.maine||[]),'#534AB7');
+  if(summaryKudosHtml){const kudosHost=document.createElement('div');kudosHost.innerHTML=summaryKudosHtml;el.appendChild(kudosHost.firstElementChild);}
   const allWeeklyAgents={};
   Object.values(agentMap).forEach(a=>{
     const ak=(a.name||'').toLowerCase().trim();
@@ -1373,6 +1379,82 @@ function renderAnnouncements(store){
 // Re-check active/expired status once a minute so a banner appears or
 // disappears on its own at the set time, even if the page is left open.
 setInterval(function(){renderAnnouncements(normalizeAnnouncementsStore((_ytdData||{}).announcements));},60000);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KUDOS (read-only display) — auto-computed weekly categories + hand-picked
+// special kudos curated in the admin. See the admin file for how these are
+// authored; this just renders whatever's currently active.
+// ═══════════════════════════════════════════════════════════════════════════════
+function normalizeSpecialKudosStore(raw){
+  const store={seacoast:[],ma:[],maine:[]};
+  if(raw&&typeof raw==='object'){
+    ['seacoast','ma','maine'].forEach(function(k){
+      if(Array.isArray(raw[k])) store[k]=raw[k].filter(Boolean);
+    });
+  }
+  return store;
+}
+function isKudosActive(entry,now){
+  now=now||new Date();
+  if(entry.startAt){const s=new Date(entry.startAt);if(!isNaN(s)&&now<s)return false;}
+  if(entry.endAt){const e=new Date(entry.endAt);if(!isNaN(e)&&now>e)return false;}
+  return true;
+}
+function activeSpecialKudos(list){
+  if(!Array.isArray(list))return [];
+  const now=new Date();
+  return list.filter(function(k){return k&&k.name&&isKudosActive(k,now);});
+}
+function allSpecialKudosCombined(store){
+  store=store||{};
+  return [].concat(store.seacoast||[],store.ma||[],store.maine||[]);
+}
+function computeAutoKudos(list,weekDeals,regionId){
+  let mostClosings=null,highestVolume=null,buyerLeader=null,mostNewListings=null;
+  (list||[]).forEach(function(a){
+    const closings=a.closed||0;
+    if(closings>0&&(!mostClosings||closings>mostClosings.value))mostClosings={name:a.name,value:closings};
+    const volume=(typeof a.dedupVolume==='number')?a.dedupVolume:(a.newLVal||0)+(a.pendVal||0)+(a.closedVal||0);
+    if(volume>0&&(!highestVolume||volume>highestVolume.value))highestVolume={name:a.name,value:volume};
+    const buyer=a.buyer||0;
+    if(buyer>0&&(!buyerLeader||buyer>buyerLeader.value))buyerLeader={name:a.name,value:buyer};
+    const newL=a.newL||0;
+    if(newL>0&&(!mostNewListings||newL>mostNewListings.value))mostNewListings={name:a.name,value:newL};
+  });
+  let biggestSale=null;
+  Object.values(weekDeals||{}).forEach(function(d){
+    if(d.status!=='CLOSED'||!(d.soldP>0))return;
+    if(regionId&&d.regionId!==regionId)return;
+    if(!biggestSale||d.soldP>biggestSale.soldP)biggestSale={name:d.name,soldP:d.soldP};
+  });
+  if(!mostClosings&&!highestVolume&&!buyerLeader&&!mostNewListings&&!biggestSale)return null;
+  return {mostClosings,highestVolume,buyerLeader,mostNewListings,biggestSale};
+}
+function renderKudosPanelHtml(autoKudos,specialList,accentColor){
+  const cards=[];
+  if(autoKudos){
+    if(autoKudos.mostClosings)cards.push({icon:'🏆',label:'Most closings',name:autoKudos.mostClosings.name,detail:autoKudos.mostClosings.value+' closing'+(autoKudos.mostClosings.value!==1?'s':'')});
+    if(autoKudos.highestVolume)cards.push({icon:'💰',label:'Highest volume',name:autoKudos.highestVolume.name,detail:fmtMoney(autoKudos.highestVolume.value)});
+    if(autoKudos.buyerLeader)cards.push({icon:'🎯',label:'Buyer contracts',name:autoKudos.buyerLeader.name,detail:autoKudos.buyerLeader.value+' agreement'+(autoKudos.buyerLeader.value!==1?'s':'')});
+    if(autoKudos.mostNewListings)cards.push({icon:'📋',label:'Most new listings',name:autoKudos.mostNewListings.name,detail:autoKudos.mostNewListings.value+' listing'+(autoKudos.mostNewListings.value!==1?'s':'')});
+    if(autoKudos.biggestSale)cards.push({icon:'🔥',label:'Biggest sale',name:autoKudos.biggestSale.name,detail:fmtMoney(autoKudos.biggestSale.soldP)});
+  }
+  const activeSpecial=activeSpecialKudos(specialList);
+  if(!cards.length&&!activeSpecial.length)return '';
+  const cardsHtml=cards.map(function(it){
+    return `<div style="background:#fff;border-radius:10px;padding:10px 12px;border:1px solid #e2e0d8;"><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:#888780;margin-bottom:4px">${it.icon} ${it.label}</div><div style="font-size:13px;font-weight:500;color:#1a1a18">${it.name}</div><div style="font-size:11px;color:#5F5E5A">${it.detail}</div></div>`;
+  }).join('');
+  const specialHtml=activeSpecial.map(function(k){
+    return `<p style="font-size:12px;margin:0;padding-top:6px;">🌟 <strong>${k.name}</strong> — ${k.detail||''}</p>`;
+  }).join('');
+  return `<div style="margin-top:8px;border-radius:10px;overflow:hidden;border:1px solid ${accentColor}30;">
+    <div style="padding:8px 14px;background:${accentColor}10;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:${accentColor}">🎉 This week's kudos</div>
+    <div style="padding:10px 14px;background:#fff;">
+      ${cardsHtml?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;${specialHtml?'margin-bottom:8px;':''}">${cardsHtml}</div>`:''}
+      ${specialHtml?`<div style="display:flex;flex-direction:column;gap:4px;${cardsHtml?'padding-top:6px;border-top:1px dashed #e2e0d8;':''}">${specialHtml}</div>`:''}
+    </div>
+  </div>`;
+}
 
 function renderAll(agentMap,deals,weekDeals){
   window._currentWeekDeals=weekDeals||{};window._currentAgents=agentMap||{};window._currentBuyerRows=window._currentBuyerRows||[];

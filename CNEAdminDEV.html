@@ -335,6 +335,15 @@
     <div id="announcements-manager-body" style="padding:12px 14px;display:flex;flex-direction:column;gap:14px;"></div>
   </div>
 
+  <!-- ── SPECIAL KUDOS MANAGER (hand-picked recognition, alongside the auto-computed kudos) ── -->
+  <div style="margin-bottom:1.25rem;border:1px solid #e2e0d8;border-radius:10px;overflow:hidden;">
+    <div style="background:#fafaf8;padding:8px 14px;border-bottom:1px solid #e2e0d8;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#5F5E5A">
+      🌟 Special Kudos Manager
+      <span style="font-weight:400;font-size:11px;text-transform:none;letter-spacing:0;color:#aaa9a2">— for recognition outside the automatic categories (anniversaries, great saves, anything). Shows in its own region's tab and in Regional Summary. Runs on its own date range like Announcements, or leave blank to run indefinitely.</span>
+    </div>
+    <div id="kudos-manager-body" style="padding:12px 14px;display:flex;flex-direction:column;gap:14px;"></div>
+  </div>
+
   <!-- ── DATA ENTRY ── -->
   <div class="paste-section">
     <div class="paste-title">Load this week's data</div>
@@ -356,6 +365,7 @@
       <button class="btn btn-preview" onclick="previewPending()">👁 Preview Before Publish</button>
       <button class="btn btn-secondary" onclick="loadSampleData()">Load sample data</button>
       <button class="btn btn-secondary" onclick="syncAllWeeksToDrive()" style="background:#534AB7;color:#fff;border-color:#534AB7">☁️ Sync All Weeks to Drive</button>
+      <button class="btn btn-secondary" onclick="backfillDedupVolume()" style="background:#BA7517;color:#fff;border-color:#BA7517" title="One-time: recomputes the Highest-Volume kudos figure for every saved week from data already on file">🔧 Backfill Kudos Volume (one-time)</button>
       <button class="btn btn-secondary" onclick="exportDataAsJSON()" style="background:#0F6E56;color:#fff;border-color:#0F6E56">⬇️ Export Data as JSON</button>
       <button class="btn btn-danger" onclick="clearAllData()">Clear all YTD data</button>
     </div>
@@ -488,12 +498,39 @@ function syncAllWeeksToDrive(){
     return;
   }
   setDriveStatus('Syncing '+_ytdData.weeks.length+' weeks to Drive...','info');
-  writeToDrive({weeks:_ytdData.weeks,announcements:_announcementsStore})
+  writeToDrive({weeks:_ytdData.weeks,announcements:_announcementsStore,specialKudos:_specialKudosStore})
     .then(function(){
       setDriveStatus('✅ All '+_ytdData.weeks.length+' weeks synced to Drive successfully!','ok');
     })
     .catch(function(e){
       setDriveStatus('❌ Sync failed: '+e.message,'err');
+    });
+}
+
+// One-time backfill: recomputes the deduped combined-volume figure
+// (dedupVolume) for every already-saved week, using that week's own
+// already-stored weekDeals -- no need to re-paste any original data.
+// Only touches the new dedupVolume field; every existing count/total
+// (New Listings, Pending, Closed, points, etc) is left completely alone.
+function backfillDedupVolume(){
+  if(!confirm('Recompute the Highest-Volume figure for every saved week using data already on file? This only affects the new Kudos volume figure -- no other stats are touched.'))return;
+  setMsg('Backfilling deduped volume for all weeks…','#185FA5');
+  readFromDrive()
+    .then(function(existing){
+      const weeks=existing.weeks||[];
+      if(!weeks.length){setMsg('No weeks found to backfill.','#A32D2D');return Promise.reject('none');}
+      weeks.forEach(function(w){
+        if(!w.agents)return;
+        applyDedupVolume(w.weekDeals||{},w.agents);
+      });
+      return writeToDrive({weeks:weeks,announcements:_announcementsStore,specialKudos:_specialKudosStore}).then(function(){return weeks;});
+    })
+    .then(function(weeks){
+      _ytdData={weeks:weeks,announcements:_announcementsStore,specialKudos:_specialKudosStore};
+      setMsg('✓ Backfilled deduped volume for '+weeks.length+' week'+(weeks.length!==1?'s':'')+'.','#1D9E75');
+    })
+    .catch(function(e){
+      if(e!=='none')setMsg('✗ Backfill failed: '+e.message,'#A32D2D');
     });
 }
 
@@ -795,7 +832,48 @@ function parseTransactions(tsv,weekLabel){
     else if(status==='FALL THRU'){if(!d._sameWeekSupersede)agents[key].pend=Math.max(0,agents[key].pend-count);}
     if(['CLOSED','PEND','NEW'].includes(status))deals.push({status,regionId,listP,soldP,isBoth,count,dk});
   });
+  applyDedupVolume(weekDeals,agents);
   return{agents,deals,weekDeals};
+}
+
+// Separate combined-volume figure (New $ + Pending $ + Closed $ added
+// together) for things like "Highest Volume" kudos. This never touches
+// the per-status counts/totals -- New Listings, Pending, and Closed stay
+// exactly as they've always been, each fully credited on their own. It
+// only prevents double-counting a single property's price when the SAME
+// MLS# appears under more than one status in the same week (e.g. listed
+// AND went pending the same week) -- that property's value counts once,
+// at its most-advanced status, toward this combined figure only.
+// Standalone so it can also backfill already-saved weeks (using their
+// already-stored weekDeals) without needing to re-paste original data.
+function applyDedupVolume(weekDeals,agents){
+  Object.keys(agents).forEach(key=>{agents[key].dedupVolume=0;});
+  const bestByAgentMls={};
+  const nonMlsTotals={};
+  Object.values(weekDeals||{}).forEach(d=>{
+    if(!['CLOSED','PEND','NEW'].includes(d.status))return;
+    const key=agentKey(d.name);
+    if(!agents[key])return;
+    const m=(d.mls||'').trim().toUpperCase();
+    const value=d.status==='CLOSED'?(d.soldP||d.listP):d.listP;
+    const rank=STATUS_RANK[d.status]||0;
+    if(m&&m!=='NON-MLS'){
+      if(!bestByAgentMls[key])bestByAgentMls[key]={};
+      const existing=bestByAgentMls[key][m];
+      if(!existing||rank>existing.rank)bestByAgentMls[key][m]={rank,value};
+    }else{
+      nonMlsTotals[key]=(nonMlsTotals[key]||0)+value;
+    }
+  });
+  Object.keys(bestByAgentMls).forEach(key=>{
+    Object.values(bestByAgentMls[key]).forEach(entry=>{
+      agents[key].dedupVolume+=entry.value;
+    });
+  });
+  Object.keys(nonMlsTotals).forEach(key=>{
+    if(agents[key])agents[key].dedupVolume+=nonMlsTotals[key];
+  });
+  return agents;
 }
 
 // pruneSupersededDeals: if the same MLS# has both a PEND and a FALL THRU row in the same
@@ -821,21 +899,6 @@ function pruneSupersededDeals(weekDeals){
     const newKeys=dks.filter(dk=>weekDeals[dk]&&weekDeals[dk].status==='NEW');
     if(closedOutKeys.length&&newKeys.length){
       newKeys.forEach(dk=>delete weekDeals[dk]);
-    }
-    // If the same MLS# shows more than one "active pipeline" status in the
-    // same week (e.g. it was a New listing AND went Pending the same week,
-    // or progressed all the way to Closed the same week), keep only the
-    // most-advanced one. Otherwise its dollar value gets counted under more
-    // than one status (New + Pending, etc), inflating totals like Highest
-    // Volume kudos and the region's New/Pending/Closed $ figures.
-    const activeRank={NEW:1,PEND:2,CLOSED:3};
-    const activeKeys=dks.filter(dk=>weekDeals[dk]&&activeRank[weekDeals[dk].status]);
-    if(activeKeys.length>1){
-      let bestKey=activeKeys[0];
-      activeKeys.forEach(dk=>{
-        if(activeRank[weekDeals[dk].status]>activeRank[weekDeals[bestKey].status])bestKey=dk;
-      });
-      activeKeys.forEach(dk=>{if(dk!==bestKey)delete weekDeals[dk];});
     }
   });
 }
@@ -887,10 +950,10 @@ function loadWeek(){
       // Announcements live independently of week data now — write the
       // current store back alongside weeks so it isn't dropped, since the
       // backend replaces the whole file on each write.
-      return writeToDrive({weeks:weeks,announcements:_announcementsStore}).then(function(){return weeks;});
+      return writeToDrive({weeks:weeks,announcements:_announcementsStore,specialKudos:_specialKudosStore}).then(function(){return weeks;});
     })
     .then(function(weeks){
-      _ytdData={weeks:weeks,announcements:_announcementsStore};
+      _ytdData={weeks:weeks,announcements:_announcementsStore,specialKudos:_specialKudosStore};
       window._currentBuyerRows=buyerRows;
       document.getElementById('current-week-label').textContent='Saved: '+label;
       renderAll(agentMap,deals,weekDeals);
@@ -908,9 +971,9 @@ function loadWeek(){
 
 function clearAllData(){
   if(!confirm('Clear ALL weeks from Google Drive? This cannot be undone.'))return;
-  writeToDrive({weeks:[],announcements:_announcementsStore})
+  writeToDrive({weeks:[],announcements:_announcementsStore,specialKudos:_specialKudosStore})
     .then(function(){
-      _ytdData={weeks:[],announcements:_announcementsStore};
+      _ytdData={weeks:[],announcements:_announcementsStore,specialKudos:_specialKudosStore};
       renderAll({},{},[]);
       updatePublishStatusBar();
       renderWeeksLoaded();
@@ -1070,6 +1133,8 @@ function renderAgentListContent(el,agentMap,deals,regionId,regionColor,r,weekDea
   let wlbOpen=false;wlbPanel.style.display='none';wlbHdrBottom.style.display='none';function toggleWlb(){wlbOpen=!wlbOpen;wlbPanel.style.display=wlbOpen?'block':'none';wlbHdrBottom.style.display=wlbOpen?'flex':'none';document.getElementById(`wlb-toggle-${regionId}`).textContent=wlbOpen?'▲ Hide':'▼ Show';}
   wlbHdrTop.addEventListener('click',toggleWlb);wlbHdrBottom.addEventListener('click',toggleWlb);
   wlbWrap.appendChild(wlbHdrTop);wlbWrap.appendChild(wlbPanel);wlbWrap.appendChild(wlbHdrBottom);el.appendChild(wlbWrap);
+  const kudosHtml=renderKudosPanelHtml(computeAutoKudos(list,weekDeals||window._currentWeekDeals||{},regionId),_specialKudosStore[regionId]||[],r.color);
+  if(kudosHtml){const kudosHost=document.createElement('div');kudosHost.innerHTML=kudosHtml;el.appendChild(kudosHost.firstElementChild);}
   const weeklyYtdAgents={};list.forEach(a=>{const ak=agentKey(a.name);weeklyYtdAgents[ak]={name:a.name,office:a.office,regionId:a.regionId,points:weeklyScore(a),weeklyPts:[weeklyScore(a)],truth:{listings:a.newL||0,pendings:a.pend||0,closings:a.closed||0,listSideListings:a.newL||0,pendList:a.pendList||0,pendBuy:a.pendBuy||0,pendBoth:a.pendBoth||0,closedList:a.closedList||0,closedBuy:a.closedBuy||0,closedBoth:a.closedBoth||0,withdrawn:a.withdrawn||0,terminated:a.terminated||0,fallThru:a.fallThru||0,listedVal:a.newLVal||0,pipelineVal:a.pendVal||0,closedVal:a.closedVal||0,buyer:a.buyer||0}};});
   renderYTDAgentLeaderboard(`wlb-panel-${regionId}`,weeklyYtdAgents,[{label:'This week'}]);
 }
@@ -1200,6 +1265,8 @@ function renderSummary(agentMap,deals,containerId){
   wlbHdrTopS.addEventListener('click',toggleWlbS);wlbHdrBottomS.addEventListener('click',toggleWlbS);
   wlbWrapS.appendChild(wlbHdrTopS);wlbWrapS.appendChild(wlbPanelS);wlbWrapS.appendChild(wlbHdrBottomS);
   el.appendChild(wlbWrapS);
+  const summaryKudosHtml=renderKudosPanelHtml(computeAutoKudos(Object.values(agentMap),window._currentWeekDeals||{},null),allSpecialKudosCombined(),'#534AB7');
+  if(summaryKudosHtml){const kudosHost=document.createElement('div');kudosHost.innerHTML=summaryKudosHtml;el.appendChild(kudosHost.firstElementChild);}
   const allWeeklyAgents={};
   Object.values(agentMap).forEach(a=>{
     const ak=(a.name||'').toLowerCase().trim();
@@ -1246,14 +1313,14 @@ function renderWeeksLoaded(){
       const idx=_ytdData.weeks.findIndex(function(wk){return wk.label===oldLabel;});
       if(idx<0){setMsg('Week not found.','#A32D2D');return;}
       _ytdData.weeks[idx]={..._ytdData.weeks[idx],label:nl};
-      writeToDrive({weeks:_ytdData.weeks,announcements:_announcementsStore})
+      writeToDrive({weeks:_ytdData.weeks,announcements:_announcementsStore,specialKudos:_specialKudosStore})
         .then(function(){renderWeeksLoaded();setMsg('Renamed "'+oldLabel+'" → "'+nl+'".','#1D9E75');})
         .catch(function(err){setMsg('Rename failed: '+err.message,'#A32D2D');});
     });
     row.querySelector('.delete-btn').addEventListener('click',function(e){
       e.stopPropagation();const lbl=this.getAttribute('data-label');
       _ytdData.weeks=_ytdData.weeks.filter(function(wk){return wk.label!==lbl;});
-      writeToDrive({weeks:_ytdData.weeks,announcements:_announcementsStore})
+      writeToDrive({weeks:_ytdData.weeks,announcements:_announcementsStore,specialKudos:_specialKudosStore})
         .then(function(){
           if(_ytdData.weeks.length){var last=_ytdData.weeks[_ytdData.weeks.length-1];renderAll(last.agents,last.deals||[],last.weekDeals||{});}else renderAll({},{},[]);
           updatePublishStatusBar();renderWeeksLoaded();setMsg('Deleted "'+lbl+'".','#1D9E75');
@@ -1388,7 +1455,7 @@ function persistAnnouncementsStore(onDone){
   readFromDrive()
     .then(function(existing){
       const weeks=existing.weeks||_ytdData.weeks||[];
-      return writeToDrive({weeks:weeks,announcements:_announcementsStore});
+      return writeToDrive({weeks:weeks,announcements:_announcementsStore,specialKudos:_specialKudosStore});
     })
     .then(function(){
       setMsg('✓ Announcements saved.','#1D9E75');
@@ -1543,6 +1610,246 @@ function renderAnnouncements(store){
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// KUDOS — auto-computed weekly categories + hand-picked special kudos.
+// Auto categories are computed fresh every render straight from that week's
+// agent/deal data (Most Closings, Highest Volume, Buyer Contracts, Most New
+// Listings, Biggest Sale) -- no manual entry needed, and any category with
+// no qualifying winner simply doesn't render. Special kudos are hand-picked,
+// stored in Drive as a top-level "specialKudos" key: {seacoast:[...],
+// ma:[...], maine:[...]}. Each entry: {id, name, label, detail, startAt,
+// endAt, createdAt, updatedAt}. Unlike Announcements, ALL currently-active
+// special kudos show at once (not just one pick), and every entry always
+// surfaces in the Regional Summary tab in addition to its own region's tab.
+// ═══════════════════════════════════════════════════════════════════════════════
+const KUDOS_REGIONS=[
+  {key:'seacoast', label:'🌊 Seacoast NH', bg:'#185FA5'},
+  {key:'ma', label:'🍁 Massachusetts', bg:'#993556'},
+  {key:'maine', label:'🌲 Maine', bg:'#0F6E56'},
+];
+let _specialKudosStore={seacoast:[],ma:[],maine:[]};
+let _kudosEditing={}; // key -> id currently open in edit form, or '__new__'
+
+function normalizeSpecialKudosStore(raw){
+  const store={seacoast:[],ma:[],maine:[]};
+  if(raw&&typeof raw==='object'){
+    ['seacoast','ma','maine'].forEach(function(k){
+      if(Array.isArray(raw[k])) store[k]=raw[k].filter(Boolean);
+    });
+  }
+  return store;
+}
+function genKudosId(){return 'k'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+function isKudosActive(entry,now){
+  now=now||new Date();
+  if(entry.startAt){const s=new Date(entry.startAt);if(!isNaN(s)&&now<s)return false;}
+  if(entry.endAt){const e=new Date(entry.endAt);if(!isNaN(e)&&now>e)return false;}
+  return true;
+}
+function kudosStatus(entry,now){
+  now=now||new Date();
+  if(entry.startAt){const s=new Date(entry.startAt);if(!isNaN(s)&&now<s)return 'scheduled';}
+  if(entry.endAt){const e=new Date(entry.endAt);if(!isNaN(e)&&now>e)return 'expired';}
+  return 'live';
+}
+function activeSpecialKudos(list){
+  if(!Array.isArray(list))return [];
+  const now=new Date();
+  return list.filter(function(k){return k&&k.name&&isKudosActive(k,now);});
+}
+function allSpecialKudosCombined(){
+  return [].concat(_specialKudosStore.seacoast||[],_specialKudosStore.ma||[],_specialKudosStore.maine||[]);
+}
+function fmtKudosDate(v){
+  if(!v)return '';
+  const d=new Date(v);
+  if(isNaN(d))return '';
+  return d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+}
+
+// ── Auto-computed weekly categories ──
+// list: array of agent objects already scoped to the desired region (or all
+// agents company-wide for Regional Summary). weekDeals: that week's full
+// deal detail (needed for Biggest Sale, which is deal-level, not an
+// agent-level rollup). regionId: pass a region id to also scope Biggest
+// Sale to that region, or leave falsy for company-wide.
+function computeAutoKudos(list,weekDeals,regionId){
+  let mostClosings=null,highestVolume=null,buyerLeader=null,mostNewListings=null;
+  (list||[]).forEach(function(a){
+    const closings=a.closed||0;
+    if(closings>0&&(!mostClosings||closings>mostClosings.value))mostClosings={name:a.name,value:closings};
+    const volume=(typeof a.dedupVolume==='number')?a.dedupVolume:(a.newLVal||0)+(a.pendVal||0)+(a.closedVal||0);
+    if(volume>0&&(!highestVolume||volume>highestVolume.value))highestVolume={name:a.name,value:volume};
+    const buyer=a.buyer||0;
+    if(buyer>0&&(!buyerLeader||buyer>buyerLeader.value))buyerLeader={name:a.name,value:buyer};
+    const newL=a.newL||0;
+    if(newL>0&&(!mostNewListings||newL>mostNewListings.value))mostNewListings={name:a.name,value:newL};
+  });
+  let biggestSale=null;
+  Object.values(weekDeals||{}).forEach(function(d){
+    if(d.status!=='CLOSED'||!(d.soldP>0))return;
+    if(regionId&&d.regionId!==regionId)return;
+    if(!biggestSale||d.soldP>biggestSale.soldP)biggestSale={name:d.name,soldP:d.soldP};
+  });
+  if(!mostClosings&&!highestVolume&&!buyerLeader&&!mostNewListings&&!biggestSale)return null;
+  return {mostClosings,highestVolume,buyerLeader,mostNewListings,biggestSale};
+}
+
+// Returns an HTML string for the kudos panel, or '' if there's nothing at
+// all to show (no auto category has a winner AND no active special kudos).
+function renderKudosPanelHtml(autoKudos,specialList,accentColor){
+  const cards=[];
+  if(autoKudos){
+    if(autoKudos.mostClosings)cards.push({icon:'🏆',label:'Most closings',name:autoKudos.mostClosings.name,detail:autoKudos.mostClosings.value+' closing'+(autoKudos.mostClosings.value!==1?'s':'')});
+    if(autoKudos.highestVolume)cards.push({icon:'💰',label:'Highest volume',name:autoKudos.highestVolume.name,detail:fmtMoney(autoKudos.highestVolume.value)});
+    if(autoKudos.buyerLeader)cards.push({icon:'🎯',label:'Buyer contracts',name:autoKudos.buyerLeader.name,detail:autoKudos.buyerLeader.value+' agreement'+(autoKudos.buyerLeader.value!==1?'s':'')});
+    if(autoKudos.mostNewListings)cards.push({icon:'📋',label:'Most new listings',name:autoKudos.mostNewListings.name,detail:autoKudos.mostNewListings.value+' listing'+(autoKudos.mostNewListings.value!==1?'s':'')});
+    if(autoKudos.biggestSale)cards.push({icon:'🔥',label:'Biggest sale',name:autoKudos.biggestSale.name,detail:fmtMoney(autoKudos.biggestSale.soldP)});
+  }
+  const activeSpecial=activeSpecialKudos(specialList);
+  if(!cards.length&&!activeSpecial.length)return '';
+  const cardsHtml=cards.map(function(it){
+    return `<div style="background:#fff;border-radius:10px;padding:10px 12px;border:1px solid #e2e0d8;"><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:#888780;margin-bottom:4px">${it.icon} ${it.label}</div><div style="font-size:13px;font-weight:500;color:#1a1a18">${it.name}</div><div style="font-size:11px;color:#5F5E5A">${it.detail}</div></div>`;
+  }).join('');
+  const specialHtml=activeSpecial.map(function(k){
+    return `<p style="font-size:12px;margin:0;padding-top:6px;">🌟 <strong>${k.name}</strong> — ${k.detail||''}</p>`;
+  }).join('');
+  return `<div style="margin-top:8px;border-radius:10px;overflow:hidden;border:1px solid ${accentColor}30;">
+    <div style="padding:8px 14px;background:${accentColor}10;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:${accentColor}">🎉 This week's kudos</div>
+    <div style="padding:10px 14px;background:#fff;">
+      ${cardsHtml?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;${specialHtml?'margin-bottom:8px;':''}">${cardsHtml}</div>`:''}
+      ${specialHtml?`<div style="display:flex;flex-direction:column;gap:4px;${cardsHtml?'padding-top:6px;border-top:1px dashed #e2e0d8;':''}">${specialHtml}</div>`:''}
+    </div>
+  </div>`;
+}
+
+// ── Special Kudos Manager (admin only) ──
+function persistSpecialKudosStore(onDone){
+  setMsg('Saving kudos to Drive…','#185FA5');
+  readFromDrive()
+    .then(function(existing){
+      const weeks=existing.weeks||_ytdData.weeks||[];
+      return writeToDrive({weeks:weeks,announcements:_announcementsStore,specialKudos:_specialKudosStore});
+    })
+    .then(function(){
+      _ytdData={weeks:_ytdData.weeks||[],announcements:_announcementsStore,specialKudos:_specialKudosStore};
+      setMsg('✓ Kudos saved.','#1D9E75');
+      renderAll(window._currentAgents||{},[],window._currentWeekDeals||{});
+      if(onDone)onDone();
+    })
+    .catch(function(e){
+      setMsg('✗ Save failed: '+e.message,'#A32D2D');
+    });
+}
+function addSpecialKudos(key){_kudosEditing[key]='__new__';renderSpecialKudosManager();}
+function editSpecialKudos(key,id){_kudosEditing[key]=id;renderSpecialKudosManager();}
+function cancelSpecialKudosEdit(key){delete _kudosEditing[key];renderSpecialKudosManager();}
+function saveSpecialKudosEntry(key,id){
+  const nameEl=document.getElementById('kudos-form-name-'+key);
+  const labelEl=document.getElementById('kudos-form-label-'+key);
+  const detailEl=document.getElementById('kudos-form-detail-'+key);
+  const startEl=document.getElementById('kudos-form-start-'+key);
+  const endEl=document.getElementById('kudos-form-end-'+key);
+  const name=(nameEl.value||'').trim();
+  const detail=(detailEl.value||'').trim();
+  if(!name||!detail){setMsg('Name and detail are both required.','#A32D2D');return;}
+  const label=(labelEl.value||'').trim();
+  const startAt=startEl.value||'';
+  const endAt=endEl.value||'';
+  if(startAt&&endAt&&new Date(endAt)<new Date(startAt)){setMsg('"Until" date must be after "Runs from" date.','#A32D2D');return;}
+  const list=_specialKudosStore[key]||(_specialKudosStore[key]=[]);
+  const nowIso=new Date().toISOString();
+  if(id==='__new__'){
+    list.push({id:genKudosId(),name:name,label:label,detail:detail,startAt:startAt,endAt:endAt,createdAt:nowIso,updatedAt:nowIso});
+  }else{
+    const idx=list.findIndex(function(e){return e.id===id;});
+    if(idx>=0)list[idx]={...list[idx],name:name,label:label,detail:detail,startAt:startAt,endAt:endAt,updatedAt:nowIso};
+  }
+  delete _kudosEditing[key];
+  persistSpecialKudosStore(renderSpecialKudosManager);
+}
+function deleteSpecialKudos(key,id){
+  if(!confirm('Delete this kudos? This cannot be undone.'))return;
+  _specialKudosStore[key]=(_specialKudosStore[key]||[]).filter(function(e){return e.id!==id;});
+  persistSpecialKudosStore(renderSpecialKudosManager);
+}
+function kudosFormHtml(key,entry){
+  const name=entry?entry.name:'';
+  const label=entry?entry.label||'':'';
+  const detail=entry?entry.detail||'':'';
+  const startAt=entry?entry.startAt||'':'';
+  const endAt=entry?entry.endAt||'':'';
+  const id=entry?entry.id:'__new__';
+  return `<div style="border:1px dashed #c8c5be;border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px;background:#fafaf8;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input id="kudos-form-name-${key}" type="text" value="${(name||'').replace(/"/g,'&quot;')}" placeholder="Agent or team name…" style="flex:1;min-width:160px;padding:6px 10px;border:1px solid #e2e0d8;border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;color:#1a1a18">
+      <input id="kudos-form-label-${key}" type="text" value="${(label||'').replace(/"/g,'&quot;')}" placeholder="Short label (e.g. 10-year anniversary)…" style="flex:1;min-width:160px;padding:6px 10px;border:1px solid #e2e0d8;border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;color:#1a1a18">
+    </div>
+    <input id="kudos-form-detail-${key}" type="text" value="${(detail||'').replace(/"/g,'&quot;')}" placeholder="One-line detail (e.g. 10 years with Verani Realty!)…" style="padding:6px 10px;border:1px solid #e2e0d8;border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;color:#1a1a18">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <label style="font-size:11px;color:#5F5E5A;display:flex;flex-direction:column;gap:3px;">Runs from <span style="font-weight:400;color:#aaa9a2">(blank = now)</span>
+        <input id="kudos-form-start-${key}" type="datetime-local" value="${startAt}" style="padding:5px 8px;border:1px solid #e2e0d8;border-radius:8px;font-size:12px;font-family:'DM Sans',sans-serif;color:#1a1a18">
+      </label>
+      <label style="font-size:11px;color:#5F5E5A;display:flex;flex-direction:column;gap:3px;">Until <span style="font-weight:400;color:#aaa9a2">(blank = never)</span>
+        <input id="kudos-form-end-${key}" type="datetime-local" value="${endAt}" style="padding:5px 8px;border:1px solid #e2e0d8;border-radius:8px;font-size:12px;font-family:'DM Sans',sans-serif;color:#1a1a18">
+      </label>
+      <div style="display:flex;gap:8px;margin-left:auto;align-self:flex-end;">
+        <button class="btn btn-secondary" style="padding:6px 14px;font-size:12px;" onclick="cancelSpecialKudosEdit('${key}')">Cancel</button>
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:12px;" onclick="saveSpecialKudosEntry('${key}','${id}')">Save</button>
+      </div>
+    </div>
+  </div>`;
+}
+function renderSpecialKudosManager(){
+  const body=document.getElementById('kudos-manager-body');
+  if(!body)return;
+  body.innerHTML='';
+  const now=new Date();
+  KUDOS_REGIONS.forEach(function(b){
+    const list=(_specialKudosStore[b.key]||[]).slice().sort(function(a,c){return new Date(c.updatedAt||c.createdAt||0)-new Date(a.updatedAt||a.createdAt||0);});
+    const section=document.createElement('div');
+    const header=document.createElement('div');
+    header.style.cssText='display:flex;align-items:center;justify-content:space-between;';
+    header.innerHTML=`<span style="font-size:12px;font-weight:700;color:${b.bg}">${b.label}</span>`;
+    const addBtn=document.createElement('button');
+    addBtn.className='btn btn-secondary';addBtn.style.cssText='padding:4px 12px;font-size:11px;';
+    addBtn.textContent='+ Add special kudos';
+    addBtn.onclick=function(){addSpecialKudos(b.key);};
+    header.appendChild(addBtn);
+    section.appendChild(header);
+    const rowsWrap=document.createElement('div');
+    rowsWrap.style.cssText='display:flex;flex-direction:column;gap:6px;margin-top:6px;';
+    if(_kudosEditing[b.key]==='__new__'){
+      const formHost=document.createElement('div');formHost.innerHTML=kudosFormHtml(b.key,null);rowsWrap.appendChild(formHost.firstElementChild);
+    }
+    if(!list.length&&_kudosEditing[b.key]!=='__new__'){
+      const empty=document.createElement('div');
+      empty.style.cssText='font-size:12px;color:#aaa9a2;padding:4px 2px;';
+      empty.textContent='No special kudos set for this region.';
+      rowsWrap.appendChild(empty);
+    }
+    list.forEach(function(entry){
+      if(_kudosEditing[b.key]===entry.id){
+        const formHost=document.createElement('div');formHost.innerHTML=kudosFormHtml(b.key,entry);rowsWrap.appendChild(formHost.firstElementChild);
+        return;
+      }
+      const status=kudosStatus(entry,now);
+      const badge=status==='live'?'<span style="font-size:10px;background:#E1F5EE;color:#0F6E56;padding:1px 7px;border-radius:10px;">Live</span>'
+        :status==='scheduled'?'<span style="font-size:10px;background:#E4E1F7;color:#534AB7;padding:1px 7px;border-radius:10px;">Scheduled</span>'
+        :'<span style="font-size:10px;background:#f0eeea;color:#888780;padding:1px 7px;border-radius:10px;">Expired</span>';
+      const dateRange=[entry.startAt?('from '+fmtKudosDate(entry.startAt)):null, entry.endAt?('until '+fmtKudosDate(entry.endAt)):null].filter(Boolean).join(' · ')||'always on';
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 8px;border:1px solid #e2e0d8;border-radius:8px;';
+      row.innerHTML=`<span style="flex:1;font-size:13px;color:#1a1a18;"><strong>${entry.name}</strong>${entry.label?' — '+entry.label:''}: ${entry.detail||''}</span><span style="font-size:11px;color:#aaa9a2;white-space:nowrap;">${dateRange}</span>${badge}<button class="edit-label-btn" style="font-size:10px;padding:2px 8px;border-radius:10px;border:1px solid #c8c5be;background:#f5f4f0;color:#5F5E5A;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">✏️ edit</button><button class="delete-btn" style="font-size:10px;padding:2px 8px;border-radius:10px;border:1px solid #F7C1C1;background:#FCEBEB;color:#A32D2D;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">✕ delete</button>`;
+      row.querySelector('.edit-label-btn').onclick=function(){editSpecialKudos(b.key,entry.id);};
+      row.querySelector('.delete-btn').onclick=function(){deleteSpecialKudos(b.key,entry.id);};
+      rowsWrap.appendChild(row);
+    });
+    section.appendChild(rowsWrap);
+    body.appendChild(section);
+  });
+}
+
 function renderAll(agentMap,deals,weekDeals){
   window._currentWeekDeals=weekDeals||{};window._currentAgents=agentMap||{};window._currentBuyerRows=window._currentBuyerRows||[];
   updateStatsBar(agentMap,deals);
@@ -1603,6 +1910,8 @@ function showTab(id,el,color,afterRender){
     _announcementsStore=normalizeAnnouncementsStore(data.announcements);
     renderAnnouncementsManager();
     renderAnnouncements(_announcementsStore);
+    _specialKudosStore=normalizeSpecialKudosStore(data.specialKudos);
+    renderSpecialKudosManager();
     sanitizeWeekData(_ytdData.weeks);
     var weeks=_ytdData.weeks||[];
     if(!weeks.length) return;
