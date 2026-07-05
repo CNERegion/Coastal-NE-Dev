@@ -822,6 +822,21 @@ function pruneSupersededDeals(weekDeals){
     if(closedOutKeys.length&&newKeys.length){
       newKeys.forEach(dk=>delete weekDeals[dk]);
     }
+    // If the same MLS# shows more than one "active pipeline" status in the
+    // same week (e.g. it was a New listing AND went Pending the same week,
+    // or progressed all the way to Closed the same week), keep only the
+    // most-advanced one. Otherwise its dollar value gets counted under more
+    // than one status (New + Pending, etc), inflating totals like Highest
+    // Volume kudos and the region's New/Pending/Closed $ figures.
+    const activeRank={NEW:1,PEND:2,CLOSED:3};
+    const activeKeys=dks.filter(dk=>weekDeals[dk]&&activeRank[weekDeals[dk].status]);
+    if(activeKeys.length>1){
+      let bestKey=activeKeys[0];
+      activeKeys.forEach(dk=>{
+        if(activeRank[weekDeals[dk].status]>activeRank[weekDeals[bestKey].status])bestKey=dk;
+      });
+      activeKeys.forEach(dk=>{if(dk!==bestKey)delete weekDeals[dk];});
+    }
   });
 }
 
