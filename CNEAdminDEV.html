@@ -1410,23 +1410,16 @@ function isAnnouncementExpired(expiresAt){
   return Date.now()>t;
 }
 // Measures one copy of the (duplicated) ticker text and sets a duration so
-// scroll speed stays consistent regardless of message length, then only
-// turns on the animation if the text is actually wider than its track
-// (short messages just sit still — nothing to loop).
+// scroll speed stays consistent regardless of message length. Always
+// scrolls continuously, even for short messages, like a real ticker.
 function setupTickerScroll(moveEl){
   requestAnimationFrame(function(){
     const seg=moveEl.querySelector('.ticker-seg');
-    const track=moveEl.parentElement;
-    if(!seg||!track)return;
+    if(!seg)return;
     const segWidth=seg.getBoundingClientRect().width;
-    const trackWidth=track.getBoundingClientRect().width;
-    if(segWidth<=trackWidth){
-      const segs=moveEl.querySelectorAll('.ticker-seg');
-      if(segs[1])segs[1].remove();
-      return;
-    }
+    const MIN_SEG_WIDTH=200; // keep short messages from looping too fast
     const PIXELS_PER_SECOND=55;
-    const duration=segWidth/PIXELS_PER_SECOND;
+    const duration=Math.max(segWidth,MIN_SEG_WIDTH)/PIXELS_PER_SECOND;
     moveEl.style.animationDuration=duration+'s';
     moveEl.classList.add('is-animating');
   });
