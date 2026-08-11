@@ -826,7 +826,7 @@ function parseTransactions(tsv,weekLabel){
     const count=isBoth?2:1;const key=agentKey(name);const regionId=getRegionIdForAgent(name,office);
     if(!agents[key])agents[key]={name,office,regionId,closed:0,closedList:0,closedBuy:0,closedBoth:0,closedVal:0,pend:0,pendList:0,pendBuy:0,pendBoth:0,pendVal:0,newL:0,newLVal:0,buyer:0,buyerAgency:0,showing:0,facilitator:0,withdrawn:0};
     if(status==='CLOSED'){agents[key].closed+=count;agents[key].closedVal+=soldP||listP;if(isBoth)agents[key].closedBoth+=1;else if(isListSide)agents[key].closedList+=1;else if(isBuySide)agents[key].closedBuy+=1;}
-    else if(status==='PEND'){agents[key].pend+=count;agents[key].pendVal+=listP;if(isBoth)agents[key].pendBoth+=1;else if(isListSide)agents[key].pendList+=1;else if(isBuySide)agents[key].pendBuy+=1;}
+    else if(status==='PEND'&&!d._excludeFromAgentTotal){agents[key].pend+=count;agents[key].pendVal+=listP;if(isBoth)agents[key].pendBoth+=1;else if(isListSide)agents[key].pendList+=1;else if(isBuySide)agents[key].pendBuy+=1;}
     else if(status==='NEW'){agents[key].newL+=count;agents[key].newLVal+=listP;}
     else if(status==='WITHDRAWN'||status==='TERMINATED'){agents[key].withdrawn+=1;}
     else if(status==='FALL THRU'){if(!d._sameWeekSupersede)agents[key].pend=Math.max(0,agents[key].pend-count);}
@@ -892,8 +892,37 @@ function pruneSupersededDeals(weekDeals){
     const fallThruKeys=dks.filter(dk=>weekDeals[dk].status==='FALL THRU');
     const pendKeys=dks.filter(dk=>weekDeals[dk].status==='PEND');
     if(fallThruKeys.length&&pendKeys.length){
-      pendKeys.forEach(dk=>delete weekDeals[dk]);
-      fallThruKeys.forEach(dk=>{weekDeals[dk]._sameWeekSupersede=true;});
+      // Same MLS# has both a Pend and a Fall Thru this week. BOTH rows always stay visible in the
+      // weekly transaction list/card -- we never delete either one, so the full history of what
+      // happened this week is never hidden. Only the AGENT TOTAL (this week's leaderboard number,
+      // which also feeds the season YTD total) is affected, based on chronological order:
+      //   - Pend came BEFORE (or same time as) the Fall Thru -> the deal went pending then died
+      //     within the week. It never became a lasting pending, so it should NOT credit the agent
+      //     with a pending at all (0, not 1). Flag the Pend row so the tally skips it.
+      //   - Pend came AFTER the Fall Thru -> the deal died, then went back under agreement again
+      //     that same week (almost certainly a different buyer/cobroke). This IS a live pending as
+      //     of week's end, so it credits the agent with exactly 1 pending. Flag the Fall Thru so it
+      //     doesn't cancel out that fresh Pend when tallied.
+      fallThruKeys.forEach(ftk=>{
+        const ft=weekDeals[ftk];
+        const ftDate=new Date(ft.date);
+        const ftValid=!isNaN(ftDate);
+        pendKeys.forEach(pk=>{
+          const p=weekDeals[pk];
+          if(!p)return;
+          const pDate=new Date(p.date);
+          const pValid=!isNaN(pDate);
+          const pendIsLater=ftValid&&pValid&&pDate>ftDate;
+          if(pendIsLater){
+            // Re-pend case: Fall Thru must not decrement this fresh Pend.
+            ft._sameWeekSupersede=true;
+          } else {
+            // Classic case (or ambiguous/same-day timestamps): Pend never lasted past the week.
+            // Keep the row visible but exclude it from agent/YTD totals.
+            p._excludeFromAgentTotal=true;
+          }
+        });
+      });
     }
     const closedOutKeys=dks.filter(dk=>weekDeals[dk]&&['WITHDRAWN','TERMINATED'].includes(weekDeals[dk].status));
     const newKeys=dks.filter(dk=>weekDeals[dk]&&weekDeals[dk].status==='NEW');
